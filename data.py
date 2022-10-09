@@ -3,12 +3,15 @@ import logging
 import math
 import os
 import os.path as osp
+from posixpath import split
 import random
 import shutil
 from typing import Optional, Union, Tuple
+from pathlib import Path
 
 import networkx as nx
 import numpy as np
+from graph_property import GraphPropertyDataset
 import torch
 import tqdm
 from ogb.graphproppred import PygGraphPropPredDataset
@@ -24,6 +27,7 @@ from torch_sparse import coalesce
 
 from csl_data import MyGNNBenchmarkDataset
 from gnn_rni_data import PlanarSATPairsDataset
+from counting_data import GraphCountDataset
 
 
 class NoParsingFilter(logging.Filter):
@@ -68,7 +72,8 @@ class TUDataset(TUDataset_):
     def num_node_labels(self):
         if self.data.x is None:
             return 0
-        num_added = 2 if isinstance(self.pre_transform, EgoNets) and self.pre_transform.add_node_idx else 0
+        num_added = 2 if (isinstance(self.pre_transform, EgoNets) and self.pre_transform.add_node_idx) or \
+                        isinstance(self.pre_transform, NodeMarked) else 0
         for i in range(self.data.x.size(1) - num_added):
             x = self.data.x[:, i + num_added:]
             if ((x == 0) | (x == 1)).all() and (x.sum(dim=1) == 1).all():
@@ -275,6 +280,43 @@ class NodeDeleted(Graph2Subgraph):
         return subgraphs
 
 
+class NodeMarked(Graph2Subgraph):
+    def to_subgraphs(self, data):
+        subgraphs = []
+
+        for i in range(data.num_nodes):
+
+            ids = torch.arange(2).repeat(data.num_nodes, 1)
+            ids[i] = torch.tensor([ids[i, 1], ids[i, 0]])
+
+            x = torch.hstack([ids, data.x]) if data.x is not None else ids.to(torch.float)
+
+            subgraphs.append(
+                Data(
+                    x=x, edge_index=data.edge_index, edge_attr=data.edge_attr,
+                    subgraph_idx=torch.tensor(i), subgraph_node_idx=torch.arange(data.num_nodes),
+                    num_nodes=data.num_nodes,
+                )
+            )
+        return subgraphs
+
+
+class Null(Graph2Subgraph):
+    def to_subgraphs(self, data):
+        subgraphs = []
+
+        for i in range(data.num_nodes):
+
+            subgraphs.append(
+                Data(
+                    x=data.x, edge_index=data.edge_index, edge_attr=data.edge_attr,
+                    subgraph_idx=torch.tensor(i), subgraph_node_idx=torch.arange(data.num_nodes),
+                    num_nodes=data.num_nodes,
+                )
+            )
+        return subgraphs
+
+
 class EgoNets(Graph2Subgraph):
     def __init__(self, num_hops, add_node_idx=False, process_subgraphs=lambda x: x, pbar=None):
         super().__init__(process_subgraphs, pbar)
@@ -310,6 +352,42 @@ class EgoNets(Graph2Subgraph):
             )
         return subgraphs
 
+
+class NestedNets(Graph2Subgraph):
+    def __init__(self, num_hops, add_node_idx=False, process_subgraphs=lambda x: x, pbar=None):
+        super().__init__(process_subgraphs, pbar)
+        self.num_hops = num_hops
+        self.add_node_idx = add_node_idx
+
+    def to_subgraphs(self, data):
+
+        subgraphs = []
+
+        for i in range(data.num_nodes):
+
+            nodes, subgraph_edge_index, mapping, edge_mask = k_hop_subgraph(i, self.num_hops, data.edge_index,
+                                                                    relabel_nodes=True, num_nodes=data.num_nodes)
+
+            subgraph_edge_attr = data.edge_attr
+
+            x = data.x[:nodes.shape[0]]
+            if self.add_node_idx:
+                # prepend a feature [0, 1] for all non-central nodes
+                # a feature [1, 0] for the central node
+                ids = torch.arange(2).repeat(nodes.shape[0], 1)
+                j = mapping[0]
+                ids[j] = torch.tensor([ids[j, 1], ids[j, 0]])
+
+                x = torch.hstack([ids, x])
+
+            subgraphs.append(
+                Data(
+                    x=x, edge_index=subgraph_edge_index, edge_attr=subgraph_edge_attr,
+                    subgraph_idx=torch.tensor(i), subgraph_node_idx=torch.arange(data.num_nodes),
+                    num_nodes=nodes.shape[0],
+                )
+            )
+        return subgraphs
 
 class S2VGraph(object):
     def __init__(self, g, label, node_tags=None, node_features=None):
@@ -527,10 +605,18 @@ def policy2transform(policy: str, num_hops, process_subgraphs=lambda x: x, pbar=
         return EdgeDeleted(process_subgraphs=process_subgraphs, pbar=pbar)
     elif policy == "node_deleted":
         return NodeDeleted(process_subgraphs=process_subgraphs, pbar=pbar)
+    elif policy == "node_marked":
+        return NodeMarked(process_subgraphs=process_subgraphs, pbar=pbar)
+    elif policy == "null":
+        return Null(process_subgraphs=process_subgraphs, pbar=pbar)
     elif policy == "ego_nets":
         return EgoNets(num_hops, process_subgraphs=process_subgraphs, pbar=pbar)
     elif policy == "ego_nets_plus":
         return EgoNets(num_hops, add_node_idx=True, process_subgraphs=process_subgraphs, pbar=pbar)
+    elif policy == "nested":
+        return NestedNets(num_hops, process_subgraphs=process_subgraphs, pbar=pbar)
+    elif policy == "nested_plus":
+        return NestedNets(num_hops, add_node_idx=True, process_subgraphs=process_subgraphs, pbar=pbar)
     elif policy == "original":
         return process_subgraphs
 
@@ -542,15 +628,18 @@ def main():
     parser.add_argument('--dataset', type=str, default='ogbg-molhiv',
                         help='which dataset to preprocess (default: ogbg-molhiv)')
     parser.add_argument('--policies', type=str, nargs='+', help='which policies to preprocess (default: all)')
+    parser.add_argument('--num_hops', type=int, default=-1)
+    parser.add_argument('--data_dir', type=str, default="dataset/")
     args = parser.parse_args()
 
     policies = args.policies
     if policies is None:
-        policies = ["edge_deleted", "node_deleted", "ego_nets", "ego_nets_plus", "original"]
+        policies = ["edge_deleted", "node_deleted", "node_marked", "ego_nets", "ego_nets_plus", "original"]
 
     num_graphs = {
         'ogbg-molhiv': 41127,
         'ogbg-moltox21': 7831,
+        'ogbg-molpcba': 437_929,
         'NCI1': 4110,
         'NCI109': 4127,
         'MUTAG': 188,
@@ -563,6 +652,7 @@ def main():
         'CSL': 150,
         'CEXP': 1200,
         'EXP': 1200,
+        'subgraphcount': 5000,
     }
     process = lambda x: x
     if 'IMDB' in args.dataset or 'REDDIT' in args.dataset:
@@ -570,15 +660,29 @@ def main():
     elif 'CSL' in args.dataset:
         process = OneHotDegree(5)
 
-    num_hops = 3 if args.dataset == 'ZINC' else (4 if args.dataset == 'CSL' else 2)
+    num_hops = args.num_hops
+    if num_hops == -1:
+        num_hops = 3 if args.dataset in ['ZINC', "graphproperty", "ogbg-molhiv"] else (4 if args.dataset == 'CSL' else 2)
+
     for policy in policies:
+        root = Path(args.data_dir)
+        if policy in ["ego_nets", "ego_nets_plus"]:
+            root /= str(num_hops)
 
         if args.dataset == 'ZINC':
-            dataset = ZINC(root="dataset/" + policy,
+            dataset = ZINC(root=root / policy,
                            subset=True,
                            pre_transform=policy2transform(policy=policy, num_hops=num_hops, process_subgraphs=process)
                            )
             continue
+        elif args.dataset == "graphproperty":
+            for split in ["train", "val", "test"]:
+                dataset = GraphPropertyDataset(root=root / policy / args.dataset,
+                            split=split,
+                            pre_transform=policy2transform(policy=policy, num_hops=num_hops, process_subgraphs=process)
+                            )
+            continue
+
 
         if 'ogbg' in args.dataset:
             DatasetName = PygGraphPropPredDataset
@@ -588,10 +692,12 @@ def main():
             DatasetName = MyGNNBenchmarkDataset
         elif args.dataset in ['EXP', 'CEXP']:
             DatasetName = PlanarSATPairsDataset
+        elif args.dataset == "subgraphcount":
+            DatasetName = GraphCountDataset
         else:
             DatasetName = TUDataset
 
-        dataset = DatasetName(root="dataset/" + policy,
+        dataset = DatasetName(root=root / policy,
                               name=args.dataset,
                               pre_transform=policy2transform(policy=policy, num_hops=num_hops,
                                                              process_subgraphs=process,

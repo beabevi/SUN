@@ -6,6 +6,7 @@ import random
 import numpy as np
 import torch
 import torch.optim as optim
+from asam import ASAM, SAM
 import wandb
 from ogb.graphproppred import Evaluator
 
@@ -16,7 +17,7 @@ from utils import get_data, get_model, SimpleEvaluator, NonBinaryEvaluator, Eval
 torch.set_num_threads(1)
 
 
-def train(model, device, loader, optimizer, criterion, epoch, fold_idx):
+def train(model, device, loader, optimizer, criterion, epoch, fold_idx, sharp=False):
     model.train()
 
     for step, batch in enumerate(loader):
@@ -25,17 +26,30 @@ def train(model, device, loader, optimizer, criterion, epoch, fold_idx):
         if batch.x.shape[0] == 1 or batch.batch[-1] == 0:
             pass
         else:
-            pred = model(batch)
-            optimizer.zero_grad()
+
             # ignore nan targets (unlabeled) when computing training loss.
             is_labeled = batch.y == batch.y
-
-            y = batch.y.view(pred.shape).to(torch.float32) if pred.size(-1) == 1 else batch.y
-            loss = criterion(pred.to(torch.float32)[is_labeled], y[is_labeled])
-
-            wandb.log({f'Loss/train': loss.item()})
-            loss.backward()
-            optimizer.step()
+            if sharp:
+                # Ascent
+                pred = model(batch)
+                y = batch.y.view(pred.shape).to(torch.float32) if pred.size(-1) == 1 else batch.y
+                loss = criterion(pred.to(torch.float32)[is_labeled], y[is_labeled])
+                loss.backward()
+                optimizer.ascent_step()
+                # Descent
+                pred_ = model(batch)
+                loss = criterion(pred_.to(torch.float32)[is_labeled], y[is_labeled])
+                loss.backward()
+                wandb.log({f'Loss/train': loss.item()})
+                optimizer.descent_step()
+            else:
+                pred = model(batch)
+                y = batch.y.view(pred.shape).to(torch.float32) if pred.size(-1) == 1 else batch.y
+                optimizer.zero_grad()
+                loss = criterion(pred.to(torch.float32)[is_labeled], y[is_labeled])
+                wandb.log({f'Loss/train': loss.item()})
+                loss.backward()
+                optimizer.step()
 
 
 def eval(model, device, loader, evaluator, voting_times=1):
@@ -98,16 +112,35 @@ def run(args, device, fold_idx, sweep_run_name, sweep_id, results_queue):
     if 'ogb' in args.dataset:
         evaluator = Evaluator(args.dataset)
     else:
-        evaluator = SimpleEvaluator(task_type) if args.dataset != "IMDB-MULTI" \
+        evaluator = SimpleEvaluator(eval_metric) if args.dataset != "IMDB-MULTI" \
                                                   and args.dataset != "CSL" else NonBinaryEvaluator(out_dim)
 
     model = get_model(args, in_dim, out_dim, device)
 
-    optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
+    sharp = False
+    if args.optimizer == 'sam':
+        aux = torch.optim.SGD(model.parameters(), lr=args.learning_rate, momentum=0.9)
+        optimizer = SAM(aux, model, rho=0.05)
+        sharp = True
+    elif args.optimizer == 'asam':
+        aux = torch.optim.SGD(model.parameters(), lr=args.learning_rate, momentum=0.9)
+        optimizer = ASAM(aux, model, rho=args.asam_rho)
+        sharp = True
+    elif args.optimizer == 'sgd':
+        optimizer = optim.SGD(model.parameters(), lr=args.learning_rate, momentum=0.9)
+    elif args.optimizer == 'adam':
+        optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
+    else:
+        raise ValueError(f'Unsupported optimiser {args.optimizer}')
     if 'ZINC' in args.dataset:
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=args.patience)
     elif 'ogb' in args.dataset:
-        scheduler = None
+        if args.decay_rate == 1:
+            scheduler = None
+        elif args.use_cosine:
+            scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, verbose=True)
+        else:
+            scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.decay_step, gamma=args.decay_rate)
     else:
         scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.decay_step, gamma=args.decay_rate)
 
@@ -115,7 +148,10 @@ def run(args, device, fold_idx, sweep_run_name, sweep_id, results_queue):
         criterion = torch.nn.BCEWithLogitsLoss() if args.dataset != "IMDB-MULTI" \
                                                     and args.dataset != "CSL" else torch.nn.CrossEntropyLoss()
     else:
-        criterion = torch.nn.L1Loss()
+        if args.dataset in ['ZINC', 'subgraphcount']:
+            criterion = torch.nn.L1Loss()
+        else:
+            criterion = torch.nn.MSELoss()
 
     # If sampling, perform majority voting on the outputs of 5 independent samples
     voting_times = 5 if args.fraction != 1. else 1
@@ -126,14 +162,14 @@ def run(args, device, fold_idx, sweep_run_name, sweep_id, results_queue):
 
     for epoch in range(1, args.epochs + 1):
 
-        train(model, device, train_loader, optimizer, criterion, epoch=epoch, fold_idx=fold_idx)
+        train(model, device, train_loader, optimizer, criterion, epoch=epoch, fold_idx=fold_idx, sharp=sharp)
 
         # Only valid_perf is used for TUD
         train_perf = eval(model, device, train_loader_eval, evaluator, voting_times) \
             if 'ogb' in args.dataset else {eval_metric: 300.}
         valid_perf = eval(model, device, valid_loader, evaluator, voting_times)
         test_perf = eval(model, device, test_loader, evaluator, voting_times) \
-            if 'ogb' in args.dataset or 'ZINC' in args.dataset else {eval_metric: 300.}
+            if 'ogb' in args.dataset or args.dataset in ['ZINC', 'subgraphcount', 'graphproperty'] else {eval_metric: 300.}
 
         if scheduler is not None:
             if 'ZINC' in args.dataset:
@@ -159,6 +195,17 @@ def run(args, device, fold_idx, sweep_run_name, sweep_id, results_queue):
 
     results_queue.put((train_curve, valid_curve, test_curve))
     return
+
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
 def main():
@@ -197,10 +244,12 @@ def main():
                         help='number of workers (default: 0)')
     parser.add_argument('--dataset', type=str, default="ogbg-molhiv",
                         help='dataset name (default: ogbg-molhiv)')
+    parser.add_argument('--data_dir', type=str, default="dataset/",
+                        help='directory where to store the data (default: dataset/)')
     parser.add_argument('--policy', type=str, default="edge_deleted",
                         help='Subgraph selection policy in {edge_deleted, node_deleted, ego_nets}'
                              ' (default: edge_deleted)')
-    parser.add_argument('--num_hops', type=int, default=2,
+    parser.add_argument('--num_hops', type=int, default=2, # FIXME in configs
                         help='Depth of the ego net if policy is ego_nets (default: 2)')
     parser.add_argument('--seed', type=int, default=0,
                         help='random seed (default: 0)')
@@ -208,15 +257,38 @@ def main():
                         help='Fraction of subsampled subgraphs (1.0 means full bag aka no sampling)')
     parser.add_argument('--patience', type=int, default=20,
                         help='patience (default: 20)')
+    parser.add_argument('--task_idx', type=int, default=-1,
+                        help='Task idx for Counting substracture task')
+    parser.add_argument('--use_transpose', type=str2bool, default=False,
+                        help='Whether to use transpose in SUN')
+    parser.add_argument('--use_residual', type=str2bool, default=False,
+                        help='Whether to use residual in SUN')
+    parser.add_argument('--use_cosine', type=str2bool, default=False,
+                        help='Whether to use cosine in SGD')
+    parser.add_argument('--optimizer', type=str, default='adam',
+                        help='Optimizer, default Adam')
+    parser.add_argument('--asam_rho', type=float, default=0.5,
+                        help='Rho parameter for asam.')
     parser.add_argument('--test', action='store_true',
                         help='quick test')
 
     parser.add_argument('--filename', type=str, default="",
                         help='filename to output result (default: )')
+    parser.add_argument('--add_bn', type=str2bool, default=True,
+                        help='Whether to use batchnorm in SUN')
+    parser.add_argument('--use_readout', type=str2bool, default=True,
+                        help='Whether to use subgraph readout in SUN')
+    parser.add_argument('--use_mlp', type=str2bool, default=True,
+                        help='Whether to use mlps (instead of linears) in SUN')
+    parser.add_argument('--subgraph_readout', type=str, default='sum',
+                        help='Subgraph readout, default sum')
 
     args = parser.parse_args()
 
     args.channels = list(map(int, args.channels.split("-")))
+    if args.channels[0] == 0:
+        # Used to get NestedGNN from DS
+        args.channels = []
     device = torch.device("cuda:" + str(args.device)) if torch.cuda.is_available() else torch.device("cpu")
 
     # set seed
@@ -235,7 +307,7 @@ def main():
     sweep_run.save()
     sweep_run_name = sweep_run.name or sweep_run.id or "unknown"
 
-    if 'ogb' in args.dataset or 'ZINC' in args.dataset:
+    if 'ogb' in args.dataset or args.dataset in ['ZINC', 'subgraphcount', 'graphproperty']:
         n_folds = 1
     elif 'CSL' in args.dataset:
         n_folds = 5
@@ -246,7 +318,7 @@ def main():
     # TODO: make it dynamic
     if n_folds > 1 and 'REDDIT' not in args.dataset:
         if args.dataset == 'PROTEINS':
-            num_proc = 2
+            num_proc = 1
         else:
             num_proc = 3 if args.batch_size == 128 and args.dataset != 'MUTAG' and args.dataset != 'PTC' else 5
     else:
@@ -293,12 +365,15 @@ def main():
     test_curve = np.mean(test_curve_folds, 0)
     test_accs_std = np.std(test_curve_folds, 0)
 
-    task_type = 'classification' if args.dataset != 'ZINC' else 'regression'
+    task_type = 'classification' if args.dataset not in ['ZINC', 'subgraphcount', 'graphproperty'] else 'regression'
     if 'classification' in task_type:
         best_val_epoch = np.argmax(valid_curve)
         best_train = max(train_curve)
     else:
-        best_val_epoch = len(valid_curve) - 1
+        if args.dataset == 'subgraphcount' or args.dataset == 'graphproperty':
+            best_val_epoch = np.argmin(valid_curve)
+        else:
+            best_val_epoch = len(valid_curve) - 1
         best_train = min(train_curve)
 
     sweep_run.summary[f'Metric/train_mean'] = train_curve[best_val_epoch]

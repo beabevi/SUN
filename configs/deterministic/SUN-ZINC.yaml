@@ -1,0 +1,36 @@
+program: main.py
+method: grid
+parameters:
+  gnn_type:
+    value: 'zincgin'
+  num_layer:
+    value: 6
+  emb_dim:
+    value: 64
+  batch_size:
+    value: 128
+  patience:
+    value: 40
+  learning_rate:
+    values: [0.001]
+  epochs:
+    value: 400
+  dataset:
+    value: 'ZINC'
+  drop_ratio:
+    value: 0.
+  channels:
+    values: ['96']
+  policy:
+    values: ['ego_nets', 'ego_nets_plus']
+  model:
+    value: 'sun'
+  num_hops:
+    value: 3
+  seed:
+    values: [1,2,3,4,5,6,7,8,9,10]
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - ${args}

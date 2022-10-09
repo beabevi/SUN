@@ -1,10 +1,12 @@
-# Equivariant Subgraph Aggregation Networks (ESAN)
+# Understanding and Extending Subgraph GNNs by Rethinking Their Symmetries
 
 This repository contains the official code of the paper
-**[Equivariant Subgraph Aggregation Networks](https://arxiv.org/abs/2110.02910) (ICLR 2022)**
+**[Understanding and Extending Subgraph GNNs by Rethinking Their Symmetries](https://arxiv.org/abs/2206.11140) (NeurIPS 2022)**.
+
+The code builds on top of the [ESAN framework](https://github.com/beabevi/ESAN).
 
 <p align="center">
-<img src=./symmetries.png width=50% height=50%>
+<img src=./SUN.png>
 </p>
 
 ## Install
@@ -17,36 +19,55 @@ and activate it
 ```
 conda activate subgraph
 ```
+Then, [set-up wandb](https://docs.wandb.ai/quickstart#1.-set-up-wandb).
 
-## Prepare the data
-Run
+## Reproduce ogbg-molhiv and ZINC results
+
+We provide the hyperparameter configurations to obtain the reported results on ogbg-molhiv (Table 2) and ZINC (Table 1).
+
+Prepare the data
 ```bash
-python data.py --dataset $DATASET
+python data.py --dataset ZINC --policies ego_nets ego_nets_plus
+python data.py --dataset ogbg-molhiv --policies ego_nets_plus
+```
+
+Obtain a sweep id `<sweep-id>` by running
+```bash
+wandb sweep configs/deterministic/<config-name>
+````
+where `configs/deterministic/<config-name>` is one between `configs/deterministic/SUN-ogbg-molhiv.yaml` and `configs/deterministic/ZINC.yaml`.
+
+Run the 10 seeds with
+```bash
+wandb agent <sweep-id>
+```
+and compute mean and std of `Metric/test_mean` over the runs in the sweep to obtain SUN results in Tables 1, 2.
+
+## Reproduce other results
+
+First, prepare the data. Run
+```bash
+python data.py --dataset $DATASET --policies $POLICY
 ```
 where `$DATASET` is one of the following:
-* MUTAG
-* PTC
-* PROTEINS
-* NCI1
-* NCI109
-* IMDB-BINARY
-* IMDB-MULTI
-* ogbg-molhiv
-* ogbg-moltox21
-* ZINC
-* CSL
-* EXP
-* CEXP
+* TUDatasets (MUTAG, PTC, PROTEINS, NCI1, NCI109, IMDB-BINARY, IMDB-MULTI) - Table 4
+* graphproperty - Table 5
+* subgraphcount (aka counting substructures) - Table 1
 
-## Run the models
+and `$POLICY` is one of the following:
+* ego_nets
+* ego_nets_plus
+* node_marked
+* null
 
 To perform hyperparameter tuning, make use of `wandb`:
 
-1. In `configs/` folder, choose the `yaml` file corresponding to the dataset and setting (deterministic vs sampling) of interest, say `<config-name>`. This file contains the hyperparameters grid.
+1. In `configs/deterministic` folder, choose the `yaml` file corresponding to the dataset of interest, say `<config-name>`.
+    This file contains the hyperparameters grid.
 
 2. Run
     ```bash
-    wandb sweep configs/<config-name>
+    wandb sweep configs/deterministic/<config-name>
     ````
     to obtain a sweep id `<sweep-id>`
 
@@ -57,10 +78,41 @@ To perform hyperparameter tuning, make use of `wandb`:
     You can run the above command multiple times on each machine you would like to contribute to the grid-search
 
 4. Open your project in your wandb account on the browser to see the results:
-    * For the TUDatasets, the CSL and the EXP/CEXP datasets, refer to `Metric/valid_mean` and `Metric/valid_std` to obtain the results.
+    * For the TUDatasets refer to `Metric/valid_mean` and `Metric/valid_std` to obtain the results.
 
-    * For the ogbg datasets and the ZINC dataset, compute mean and std of `Metric/train_mean`, `Metric/valid_mean`, `Metric/test_mean` over the different seeds of the same configuration.
+    * For graphproperty and subgraphcount,
+    compute mean and std of `Metric/train_mean`, `Metric/valid_mean`, `Metric/test_mean` by grouping over all hyperparameters and averaging over the different seeds.
     Then, take the results corresponding to the configuration obtaining the best validation metric.
+
+
+Note that in `configs/deterministic/SUN-subgraphcount.yaml`,
+key `task_idx` indicates the target, that is, 0, 1, 2, 3 indicates respectively Triangle, Tailed Tri., Star and 4-Cycle.
+Similarly in `configs/deterministic/SUN-graphproperty.yaml`, key `task_idx` 0, 1, 2 indicates respectively IsConnected, Diameter, Radius.
+
+## Get generalisation curves
+
+Values for GIN and GNN-AK models are obtained with the [GNN-AK](https://github.com/LingxiaoShawn/GNNAsKernel) code; DSS-GNN, DS-GNN and NGNN values can be obtained by running the code in this repo with the appropriate model.
+
+We report results for these methods in the `out/` folder.
+
+SUN curves can be obtained as detailed below.
+
+### ZINC (Figure 4c)
+
+Prepare the data
+```bash
+python data.py --dataset ZINC --policies ego_nets
+```
+
+Run
+```bash
+for i in {1..10}; do python plot.py --batch_size=128 --channels=96 --dataset=ZINC --drop_ratio=0 --emb_dim=64 --epochs=400 --gnn_type=zincgin --learning_rate=0.001 --model=sun --num_layer=6 --patience=40 --policy=ego_nets --num_hops=3 --seed="$i"; done
+```
+
+Then, plot the curve in `ego_nets-ZINC-plot.pdf` by running
+```bash
+python make_plot_zinc.py
+```
 
 
 ## Credits
@@ -68,10 +120,10 @@ To perform hyperparameter tuning, make use of `wandb`:
 For attribution in academic contexts, please cite
 
 ```
-@inproceedings{bevilacqua2022equivariant,
-title={Equivariant Subgraph Aggregation Networks},
-author={Beatrice Bevilacqua and Fabrizio Frasca and Derek Lim and Balasubramaniam Srinivasan and Chen Cai and Gopinath Balamurugan and Michael M. Bronstein and Haggai Maron},
-booktitle={International Conference on Learning Representations},
+@inproceedings{frasca2022understanding,
+title={Understanding and Extending Subgraph GNNs by Rethinking Their Symmetries},
+author={Frasca, Fabrizio and Bevilacqua, Beatrice and Bronstein, Michael M and Maron, Haggai},
+booktitle={Advances in Neural Information Processing Systems},
 year={2022},
 }
 ```

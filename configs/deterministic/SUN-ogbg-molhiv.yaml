@@ -1,0 +1,46 @@
+program: main.py
+method: grid
+parameters:
+  gnn_type:
+    values: ['gin']
+  num_layer:
+    values: [2]
+  emb_dim:
+    value: 64
+  batch_size:
+    values: [32]
+  learning_rate:
+    values: [0.01]
+  epochs:
+    value: 200
+  decay_rate:
+    value: 1.
+  dataset:
+    values: ['ogbg-molhiv']
+  drop_ratio:
+    values: [0.3]
+  channels:
+    values: ['64-64']
+  policy:
+    values: ['ego_nets_plus']
+  model:
+    value: 'sun'
+  seed:
+    values: [1,2,3,4,5,6,7,8,9,10]
+  use_residual:
+    value: True
+  use_readout:
+    value: False
+  add_bn:
+    value: True
+  use_mlp:
+    value: False
+  num_hops:
+    value: 3
+  optimizer:
+    value: 'asam'
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - ${args}

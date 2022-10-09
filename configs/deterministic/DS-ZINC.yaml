@@ -4,9 +4,9 @@ parameters:
   gnn_type:
     value: 'zincgin'
   num_layer:
-    value: 4
+    value: 6
   emb_dim:
-    value: 64
+    value: 128
   batch_size:
     value: 128
   learning_rate:
@@ -20,11 +20,13 @@ parameters:
   drop_ratio:
     value: 0.
   channels:
-    values: ['96', '96-96']
+    values: ['128-128', '128', '64-64', '64']
   policy:
-    values: ['edge_deleted', 'node_deleted', 'ego_nets', 'ego_nets_plus']
+    values: ['ego_nets']
   model:
     value: 'deepsets'
+  num_hops:
+    value: 3
   seed:
     values: [1,2,3,4,5,6,7,8,9,10]
 command:

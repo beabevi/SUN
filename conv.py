@@ -10,6 +10,8 @@ from torch_geometric.nn import GraphConv
 from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import degree
 
+from torch_sparse import matmul
+from torch import Tensor
 
 ### GIN convolution along the graph structure
 class GINConv(MessagePassing):
@@ -37,6 +39,44 @@ class GINConv(MessagePassing):
 
     def update(self, aggr_out):
         return aggr_out
+
+
+class GraphConvE(MessagePassing):
+    def __init__(self, in_dim, emb_dim):
+        super().__init__(aggr="add")
+
+        self.in_channels = in_dim
+        self.out_channels = emb_dim
+
+        if isinstance(self.in_channels, int):
+            self.in_channels = (self.in_channels, self.in_channels)
+
+        self.lin_rel = torch.nn.Linear(self.in_channels[0], self.out_channels)
+        self.lin_root = torch.nn.Linear(self.in_channels[1], self.out_channels, bias=False)
+        self.bond_encoder = BondEncoder(emb_dim=self.out_channels)
+
+    def forward(self, x, edge_index, edge_attr):
+        edge_embedding = self.bond_encoder(edge_attr)
+        if isinstance(x, Tensor):
+            x = (x, x)
+
+        # propagate_type: (x: OptPairTensor, edge_weight: OptTensor)
+        out = self.propagate(edge_index, x=x, edge_weight=edge_embedding)
+
+        x_r = x[1]
+        if x_r is not None:
+            out += self.lin_root(x_r)
+
+        return out
+
+    def message(self, x_j, edge_weight):
+        return self.lin_rel(x_j) if edge_weight is None else self.lin_rel(x_j) + edge_weight
+
+
+class ZINCGraphConvE(GraphConvE):
+    def __init__(self, in_dim, emb_dim):
+        super(ZINCGraphConvE, self).__init__(in_dim, emb_dim)
+        self.bond_encoder = torch.nn.Embedding(4, emb_dim)
 
 
 class ZINCGINConv(MessagePassing):

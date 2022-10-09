@@ -1,0 +1,40 @@
+program: main.py
+method: grid
+parameters:
+  gnn_type:
+    values: ['originalgin']
+  num_layer:
+    values: [5, 6]
+  emb_dim:
+    values: [64, 128]
+  batch_size:
+    values: [128]
+  learning_rate:
+    values: [0.001]
+  decay_rate:
+    value: 0.5
+  decay_step:
+    value: 50
+  epochs:
+    value: 250
+  dataset:
+    value: 'subgraphcount'
+  jk:
+    value: 'concat'
+  drop_ratio:
+    value: 0.
+  channels:
+    value: "0"
+  policy:
+    values: ['ego_nets', 'ego_nets_plus', 'nested', 'nested_plus']
+  model:
+    values: ['deepsets']
+  seed:
+    values: [1,2,3]
+  task_idx:
+    value: 3
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - ${args}
