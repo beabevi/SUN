@@ -97,6 +97,38 @@ We report results for these methods in the `out/` folder.
 
 SUN curves can be obtained as detailed below.
 
+### 4-Cycles (EGO) (Figure 4a)
+
+Prepare the data
+```bash
+python data.py --dataset subgraphcount --policies ego_nets
+```
+Run
+```bash
+for i in {1..10}; do python plot.py --batch_size=128 --channels=96 --dataset=subgraphcount --drop_ratio=0 --emb_dim=110 --epochs=250 --gnn_type=originalgin --jk=concat --learning_rate=0.001 --model=sun --num_layer=5 --policy=ego_nets --task_idx=3 --seed="$i"; done
+```
+
+Then, plot the curve in `ego_nets-plot.pdf` by running
+```bash
+python make_plot.py --policy ego_nets
+```
+
+### 4-Cycles (EGO+) (Figure 4b)
+
+Prepare the data
+```bash
+python data.py --dataset subgraphcount --policies ego_nets_plus
+```
+Run
+```bash
+for i in {1..10}; do python plot.py --batch_size=128 --channels=96 --dataset=subgraphcount --drop_ratio=0 --emb_dim=96 --epochs=250 --gnn_type=originalgin --jk=concat --learning_rate=0.001 --model=sun --num_layer=6 --policy=ego_nets_plus --task_idx=3 --seed="$i"; done
+```
+
+Then, plot the curve in `ego_nets_plus-plot.pdf` by running
+```bash
+python make_plot.py --policy ego_nets_plus
+```
+
 ### ZINC (Figure 4c)
 
 Prepare the data

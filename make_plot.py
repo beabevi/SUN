@@ -16,7 +16,7 @@ args = parser.parse_args()
 name = {"ego_nets": "EGO", "ego_nets_plus": "EGO+"}
 
 metric = "Metric/test_mean"
-outdir = Path(f"out/{args.policy}")
+outdir = Path(f"out/subgraphcount/{args.policy}")
 
 labels = {"GNN": "GNN", "NESTED": "NGNN", 'deepsets': 'DS', "dss": "DSS", "sun":"SUN", "GNN-AK": "GNN-AK", "GNN-AK-ctx": "GNN-AK-ctx"}
 
