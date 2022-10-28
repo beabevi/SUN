@@ -1,7 +1,7 @@
 # Understanding and Extending Subgraph GNNs by Rethinking Their Symmetries
 
 This repository contains the official code of the paper
-**[Understanding and Extending Subgraph GNNs by Rethinking Their Symmetries](https://arxiv.org/abs/2206.11140) (NeurIPS 2022)**.
+**[Understanding and Extending Subgraph GNNs by Rethinking Their Symmetries](https://arxiv.org/abs/2206.11140) (NeurIPS 2022 Oral)**.
 
 The code builds on top of the [ESAN framework](https://github.com/beabevi/ESAN).
 
@@ -35,7 +35,7 @@ Obtain a sweep id `<sweep-id>` by running
 ```bash
 wandb sweep configs/deterministic/<config-name>
 ````
-where `configs/deterministic/<config-name>` is one between `configs/deterministic/SUN-ogbg-molhiv.yaml` and `configs/deterministic/ZINC.yaml`.
+where `configs/deterministic/<config-name>` is one between `configs/deterministic/SUN-ogbg-molhiv.yaml` and `configs/deterministic/SUN-ZINC.yaml`.
 
 Run the 10 seeds with
 ```bash
