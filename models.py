@@ -12,7 +12,7 @@ def get_subgraph_idx(batched_data):
                      torch.cumsum(num_subgraphs, dim=0)])
     graph_offset = tmp[batched_data.batch]
 
-    subgraph_idx = graph_offset + batched_data.subgraph_batch
+    subgraph_idx = graph_offset + batched_data.node2subgraph
     return subgraph_idx
 
 
@@ -79,7 +79,7 @@ def get_transpose_idx(batched_data):
     #     0,1,
     # ])
 
-    # batched_data.subgraph_batch = torch.tensor([
+    # batched_data.node2subgraph = torch.tensor([
     #     0,0,0,
     #     1,1,1,
     #     2,2,2,
@@ -100,7 +100,7 @@ def get_transpose_idx(batched_data):
     num_nodes_sub = num_nodes_per_subgraph[batched_data.subgraph_idx_batch]
 
     subgraph_node_idx = batched_data.subgraph_node_idx
-    subgraph_batch = batched_data.subgraph_batch
+    node2subgraph = batched_data.node2subgraph
 
     index = torch.cat([torch.zeros(1, device=num_nodes_per_subgraph.device, dtype=num_nodes_per_subgraph.dtype),
                     torch.cumsum(num_nodes_per_subgraph, dim=0)])[:-1]
@@ -109,7 +109,7 @@ def get_transpose_idx(batched_data):
 
     graph_offset = subgraph_offset[index][batched_data.batch]
 
-    result = subgraph_node_idx * num_nodes_nod + subgraph_batch + graph_offset
+    result = subgraph_node_idx * num_nodes_nod + node2subgraph + graph_offset
 
     # assert (result == torch.tensor([ 0,  3,  6,  1,  4,  7,  2,  5,  8,  9, 11, 10, 12, 13, 14, 16, 15, 17])).all()
     # import pdb; pdb.set_trace()

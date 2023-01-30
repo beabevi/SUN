@@ -9,12 +9,12 @@ import shutil
 from typing import Optional, Union, Tuple
 from pathlib import Path
 
+from ogb.graphproppred import PygGraphPropPredDataset
 import networkx as nx
 import numpy as np
 from graph_property import GraphPropertyDataset
 import torch
 import tqdm
-from ogb.graphproppred import PygGraphPropPredDataset
 from sklearn.model_selection import StratifiedKFold
 from torch import Tensor
 from torch_geometric.data import Data, Batch, InMemoryDataset, download_url, extract_zip
@@ -107,7 +107,7 @@ class Sampler:
         batch = Batch.from_data_list(sampled_subgraphs)
 
         return SubgraphData(x=batch.x, edge_index=batch.edge_index, edge_attr=batch.edge_attr,
-                            subgraph_batch=batch.batch,
+                            node2subgraph=batch.batch,
                             y=data.y, subgraph_idx=batch.subgraph_idx, subgraph_node_idx=batch.subgraph_node_idx,
                             num_subgraphs=len(sampled_subgraphs), num_nodes_per_subgraph=data.num_nodes,
                             original_edge_index=data.edge_index, original_edge_attr=data.edge_attr)
@@ -117,11 +117,11 @@ ORIG_EDGE_INDEX_KEY = 'original_edge_index'
 
 
 class SubgraphData(Data):
-    def __inc__(self, key, value):
+    def __inc__(self, key, value, *args, **kwargs):
         if key == ORIG_EDGE_INDEX_KEY:
             return self.num_nodes_per_subgraph
         else:
-            return super().__inc__(key, value)
+            return super().__inc__(key, value, *args, **kwargs)
 
 
 # TODO: update Pytorch Geometric since this function is on the newest version
@@ -210,7 +210,7 @@ class Graph2Subgraph:
         if self.pbar is not None: next(self.pbar)
 
         return SubgraphData(x=batch.x, edge_index=batch.edge_index, edge_attr=batch.edge_attr,
-                            subgraph_batch=batch.batch,
+                            node2subgraph=batch.batch,
                             y=data.y, subgraph_idx=batch.subgraph_idx, subgraph_node_idx=batch.subgraph_node_idx,
                             num_subgraphs=len(subgraphs), num_nodes_per_subgraph=data.num_nodes,
                             original_edge_index=data.edge_index, original_edge_attr=data.edge_attr)

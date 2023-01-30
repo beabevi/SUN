@@ -1,9 +1,9 @@
 import numpy as np
+from ogb.graphproppred import PygGraphPropPredDataset
 from graph_property import GraphPropertyDataset
 from ogb.graphproppred import Evaluator as Evaluator_
-from ogb.graphproppred import PygGraphPropPredDataset
 from ogb.graphproppred.mol_encoder import AtomEncoder
-from torch_geometric.data import DataLoader
+from torch_geometric.loader import DataLoader
 from torch_geometric.datasets import ZINC
 from torch_geometric.nn import GraphConv
 from torch_geometric.transforms import OneHotDegree

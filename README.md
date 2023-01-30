@@ -3,6 +3,9 @@
 This repository contains the official code of the paper
 **[Understanding and Extending Subgraph GNNs by Rethinking Their Symmetries](https://arxiv.org/abs/2206.11140) (NeurIPS 2022 Oral)**.
 
+The master branch contains the most recent version of the code, using `pyg=2.2.0` and `pytorch=1.13.1`.
+For the version submitted at NeurIPS 2022, check out the [`neurips22`](https://github.com/beabevi/SUN/tree/neurips22) tag.
+
 The code builds on top of the [ESAN framework](https://github.com/beabevi/ESAN).
 
 <p align="center">
